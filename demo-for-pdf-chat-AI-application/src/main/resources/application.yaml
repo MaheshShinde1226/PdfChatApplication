@@ -1,0 +1,27 @@
+
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ragdb
+    username: raguser
+    password: ragpass
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        jpa:
+          defer-datasource-initialization: true   # IMPORTANT: run schema.sql before JPA uses the DB
+
+ollama:
+  base-url: "http://localhost:11434"
+  embed-model: "mxbai-embed-large"
+  gen-model: "mistral"
+
+rag:
+  chunk-size: 800
+  chunk-overlap: 150
+  top-k: 6
