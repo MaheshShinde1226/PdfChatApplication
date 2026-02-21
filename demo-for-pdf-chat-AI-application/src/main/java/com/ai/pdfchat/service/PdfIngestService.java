@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -131,7 +132,8 @@ public class PdfIngestService {
 
 
     private String extractText(MultipartFile file) throws IOException {
-        try (PDDocument doc = Loader.loadPDF(file.getInputStream().readAllBytes())) {
+        try (InputStream is = file.getInputStream();
+             PDDocument doc = Loader.loadPDF(is.readAllBytes())) {
             PDFTextStripper stripper = new PDFTextStripper();
             return stripper.getText(doc);
         }
@@ -146,7 +148,7 @@ public class PdfIngestService {
             String c = text.substring(start, end).trim();
             if (!c.isEmpty()) chunks.add(c);
             if (end == text.length()) break;
-            start = Math.max(end - overlap, end);
+            start = Math.max(0, end - overlap);
         }
         return chunks;
     }
