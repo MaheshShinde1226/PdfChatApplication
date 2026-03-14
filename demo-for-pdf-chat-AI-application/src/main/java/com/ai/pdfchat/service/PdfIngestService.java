@@ -1,6 +1,6 @@
 package com.ai.pdfchat.service;
 
-import com.ai.pdfchat.client.OllamaClient;
+import com.ai.pdfchat.client.OpenAiClient;
 import com.ai.pdfchat.model.DocumentChunk;
 import com.ai.pdfchat.repo.DocumentChunkRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,10 +14,13 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -26,7 +29,7 @@ public class PdfIngestService {
 
     private final DocumentChunkRepository repo;
     private final JdbcTemplate jdbc;
-    private final OllamaClient ollama;
+    private final OpenAiClient openAi;
     private final ObjectMapper mapper = new ObjectMapper();
 
 
@@ -34,15 +37,23 @@ public class PdfIngestService {
     private final int chunkOverlap = 150;
 
 
-    public PdfIngestService(DocumentChunkRepository repo, JdbcTemplate jdbc, OllamaClient ollama) {
+    public PdfIngestService(DocumentChunkRepository repo, JdbcTemplate jdbc, OpenAiClient openAi) {
         this.repo = repo;
         this.jdbc = jdbc;
-        this.ollama = ollama;
+        this.openAi = openAi;
     }
 
 
-    // ingest method (instrumented)
-    public void ingest(MultipartFile file) throws IOException {
+    /** Supported file extensions (lowercase) for upload. */
+    public static final Set<String> SUPPORTED_EXTENSIONS = Set.of("pdf", "txt", "md", "text");
+
+    /**
+     * Ingest a document (PDF, TXT, or MD), chunk it, embed with OpenAI, and store.
+     *
+     * @return documentId (UUID) that identifies this ingested document
+     */
+    public String ingest(MultipartFile file) throws IOException {
+        String documentId = UUID.randomUUID().toString();
         String text = extractText(file);
         List<String> chunks = chunkText(text, chunkSize, chunkOverlap);
 
@@ -50,16 +61,16 @@ public class PdfIngestService {
             String chunk = chunks.get(i);
             log.info("Processing chunk #{} (len={})", i, chunk == null ? 0 : chunk.length());
 
-            // 1) get embedding from Ollama (with single retry)
+            // 1) get embedding from OpenAI (with single retry)
             List<Double> emb = null;
             try {
-                emb = ollama.embed(chunk);
+                emb = openAi.embed(chunk);
                 if (emb == null || emb.isEmpty()) {
                     log.warn("First embed attempt returned null/empty for chunk {}", i);
-                    emb = ollama.embed(chunk); // retry once
+                    emb = openAi.embed(chunk); // retry once
                 }
             } catch (Exception e) {
-                log.error("Exception while calling ollama.embed for chunk {}: {}", i, e.getMessage(), e);
+                log.error("Exception while calling OpenAI embed for chunk {}: {}", i, e.getMessage(), e);
             }
 
             log.info("Embedding result for chunk {}: {}", i, emb == null ? "null" : ("size=" + emb.size()));
@@ -72,8 +83,11 @@ public class PdfIngestService {
             dc = repo.save(dc);
             log.info("Saved DocumentChunk id={}", dc.getId());
 
-            // 3) save metadata (always)
-            String metadataJson = mapper.writeValueAsString(Map.of("source", file.getOriginalFilename(), "chunkIndex", i));
+            // 3) save metadata (always), including documentId
+            String metadataJson = mapper.writeValueAsString(Map.of(
+                    "documentId", documentId,
+                    "source", file.getOriginalFilename(),
+                    "chunkIndex", i));
             try {
                 saveMetadata(dc.getId(), metadataJson);
                 log.info("Saved metadata for id={}", dc.getId());
@@ -97,6 +111,18 @@ public class PdfIngestService {
                 log.error("Failed to save embedding for id={}: {}", dc.getId(), e.getMessage(), e);
             }
         }
+        return documentId;
+    }
+
+    /**
+     * Check if the file's extension is supported for ingestion.
+     */
+    public boolean isSupportedFormat(String filename) {
+        if (filename == null || filename.isBlank()) return false;
+        int dot = filename.lastIndexOf('.');
+        if (dot < 0) return false;
+        String ext = filename.substring(dot + 1).trim().toLowerCase();
+        return SUPPORTED_EXTENSIONS.contains(ext);
     }
 
     /** returns rows updated */
@@ -132,10 +158,36 @@ public class PdfIngestService {
 
 
     private String extractText(MultipartFile file) throws IOException {
+        String filename = file.getOriginalFilename() != null ? file.getOriginalFilename() : "";
+        String ext = getExtension(filename);
+
+        if ("pdf".equals(ext)) {
+            return extractTextFromPdf(file);
+        }
+        if (SUPPORTED_EXTENSIONS.contains(ext)) {
+            return extractTextFromPlain(file);
+        }
+        throw new IllegalArgumentException("Unsupported file format: " + filename
+                + ". Supported: " + String.join(", ", SUPPORTED_EXTENSIONS));
+    }
+
+    private static String getExtension(String filename) {
+        if (filename == null || filename.isBlank()) return "";
+        int dot = filename.lastIndexOf('.');
+        return dot < 0 ? "" : filename.substring(dot + 1).trim().toLowerCase();
+    }
+
+    private String extractTextFromPdf(MultipartFile file) throws IOException {
         try (InputStream is = file.getInputStream();
              PDDocument doc = Loader.loadPDF(is.readAllBytes())) {
             PDFTextStripper stripper = new PDFTextStripper();
             return stripper.getText(doc);
+        }
+    }
+
+    private String extractTextFromPlain(MultipartFile file) throws IOException {
+        try (InputStream is = file.getInputStream()) {
+            return new String(is.readAllBytes(), StandardCharsets.UTF_8);
         }
     }
 

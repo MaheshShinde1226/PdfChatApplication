@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS document_chunks (
     chunk_index INT,
     content TEXT,
     metadata JSONB,
-    embedding vector(1024)   -- must match your converter & model embedding dimension
+    embedding vector(1536)   -- must match your converter & model embedding dimension
 );
 
 -- Create IVFFlat index for cosine similarity search (requires ANALYZE before use)

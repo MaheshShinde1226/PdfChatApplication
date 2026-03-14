@@ -16,10 +16,11 @@ spring:
         jpa:
           defer-datasource-initialization: true   # IMPORTANT: run schema.sql before JPA uses the DB
 
-ollama:
-  base-url: "http://localhost:11434"
-  embed-model: "mxbai-embed-large"
-  gen-model: "mistral"
+# OpenAI API (embeddings + chat). Set OPENAI_API_KEY env var or openai.api-key in config.
+openai:
+  api-key: ${OPENAI_API_KEY:}
+  embed-model: "text-embedding-3-small"
+  chat-model: "gpt-4o-mini"
 
 rag:
   chunk-size: 800

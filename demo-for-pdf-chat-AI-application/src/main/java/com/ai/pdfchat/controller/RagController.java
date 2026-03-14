@@ -13,6 +13,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/rag")
+@CrossOrigin("*")
 public class RagController {
     private final PdfIngestService ingestService;
     private final RagService ragService;
@@ -24,20 +25,30 @@ public class RagController {
     }
 
 
+    /**
+     * Ingest a document (PDF, TXT, or MD). Returns a documentId that identifies this upload.
+     */
     @PostMapping("/ingest")
-    public ResponseEntity<?> ingestPdf(@ModelAttribute("file") MultipartFile file) throws IOException {
-        ingestService.ingest(file);
-        return ResponseEntity.ok(Map.of("status", "ingested"));
+    public ResponseEntity<?> ingestDocument(@RequestParam("file") MultipartFile file) throws IOException {
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "file is required"));
+        }
+        if (!ingestService.isSupportedFormat(file.getOriginalFilename())) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "Unsupported file format. Supported: pdf, txt, md, text"));
+        }
+        String documentId = ingestService.ingest(file);
+        return ResponseEntity.ok(Map.of("status", "ingested", "documentId", documentId));
     }
 
 
     @PostMapping("/ask")
     public ResponseEntity<?> ask(@RequestBody AskRequest req) {
         if (req == null || req.getQuestion() == null || req.getQuestion().isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("error","question is required"));
+            return ResponseEntity.badRequest().body(Map.of("error", "question is required"));
         }
         try {
-            String ans = ragService.answerQuestion(req.getQuestion());
+            String ans = ragService.answerQuestion(req.getQuestion(), req.getDocumentId());
             return ResponseEntity.ok(Map.of("answer", ans));
         } catch (IllegalStateException e) {
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of("error", e.getMessage()));

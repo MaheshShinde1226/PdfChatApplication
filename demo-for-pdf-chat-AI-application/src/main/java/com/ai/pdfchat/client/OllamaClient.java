@@ -16,7 +16,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Slf4j
-@Component
+// Not a bean: app uses OpenAiClient for embeddings and chat.
 public class OllamaClient {
     private final WebClient webClient;
     private final ObjectMapper mapper = new ObjectMapper();
